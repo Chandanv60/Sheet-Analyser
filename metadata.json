@@ -1,0 +1,6 @@
+{
+  "name": "Google Sheets Data Visualizer",
+  "description": "An interactive full-stack business intelligence builder designed to ingest any Google Sheet URL, run multidimensional data aggregations, support custom column segmentation with filters, and write executive operational summaries using server-side Gemini 3.5 AI.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
