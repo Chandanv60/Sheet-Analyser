@@ -61,7 +61,9 @@ const CHART_COLORS = [
 
 export default function App() {
   // Input Google Sheet link or spreadsheet ID
-  const [sheetUrlOrId, setSheetUrlOrId] = useState("");
+  const [sheetUrlOrId, setSheetUrlOrId] = useState(() => {
+    return localStorage.getItem("sheetSight_lastUrl") || "";
+  });
   const [loadingSheet, setLoadingSheet] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   
@@ -98,18 +100,24 @@ export default function App() {
   const [insightsText, setInsightsText] = useState<string>("");
   const [generatingInsights, setGeneratingInsights] = useState(false);
 
-  // Initialize with First Default Sample on Load
+  // Initialize with last saved URL or Default Sample on Load
   useEffect(() => {
-    loadSampleDataset(0);
+    const savedUrl = localStorage.getItem("sheetSight_lastUrl");
+    if (savedUrl) {
+      handleImportGoogleSheet(undefined, savedUrl);
+    } else {
+      loadSampleDataset(0);
+    }
   }, []);
 
   // Whenever dataset or report parameters shift, adjust local aggregated points
   const aggregatedPoints = sheetData ? aggregateData(sheetData.rows, reportConfig) : [];
 
   // Parse Google Sheet from URL
-  const handleImportGoogleSheet = async (e?: React.FormEvent) => {
+  const handleImportGoogleSheet = async (e?: React.FormEvent, directUrl?: string) => {
     if (e) e.preventDefault();
-    if (!sheetUrlOrId.trim()) return;
+    const urlToLoad = directUrl || sheetUrlOrId;
+    if (!urlToLoad.trim()) return;
 
     setLoadingSheet(true);
     setErrorMsg(null);
@@ -119,7 +127,7 @@ export default function App() {
       const response = await fetch("/api/sheets/parse-url", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: sheetUrlOrId })
+        body: JSON.stringify({ url: urlToLoad })
       });
 
       const data = await response.json();
@@ -137,12 +145,20 @@ export default function App() {
       };
 
       setSheetData(importedSheet);
+      localStorage.setItem("sheetSight_lastUrl", urlToLoad);
+      if (directUrl) {
+        setSheetUrlOrId(directUrl);
+      }
       
       // Auto-analyze headers and suggest dimensions using Gemini API
       await triggerDatasetIntelligence(importedSheet);
     } catch (err: any) {
       console.error(err);
       setErrorMsg(err.message || "Failed to load Google Sheet. Ensure the spreadsheet is shared with 'Anyone with the link can view' access.");
+      if (directUrl) {
+        // Fall back to sample dataset if the savedUrl failed to load
+        loadSampleDataset(0);
+      }
     } finally {
       setLoadingSheet(false);
     }
@@ -377,7 +393,7 @@ export default function App() {
           </div>
           
           <div className="flex items-center gap-2 w-full md:w-auto justify-end">
-            <span className="text-xs text-slate-400 hidden sm:inline font-medium">Switch Test Source:</span>
+            <span className="text-xs text-slate-400 hidden sm:inline font-medium">Default Dataset:</span>
             <div className="flex gap-1.5 flex-wrap">
               {SAMPLE_DATASETS.map((item, idx) => (
                 <button
@@ -388,7 +404,7 @@ export default function App() {
                   }`}
                 >
                   <Database className="w-3.5 h-3.5 text-indigo-600" />
-                  {idx === 0 ? "Enterprise Sales" : idx === 1 ? "SaaS Signup" : idx === 2 ? "Project Spend" : "CBD Sourcing"}
+                  <span>CBD Sourcing</span>
                 </button>
               ))}
             </div>
