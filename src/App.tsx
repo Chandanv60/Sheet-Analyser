@@ -360,7 +360,7 @@ export default function App() {
 
       {/* Corporate Header Nav */}
       <header id="app-main-header" className="bg-white border-b border-slate-200 py-4 px-6 sticky top-0 z-30 shadow-xs">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="max-w-[98%] mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 bg-indigo-600 rounded-md flex items-center justify-center text-white font-bold text-lg shadow-sm">
               Σ
@@ -397,7 +397,7 @@ export default function App() {
       </header>
 
       {/* Main Container Area */}
-      <main id="app-workspace" className="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <main id="app-workspace" className="flex-1 max-w-[98%] w-full mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6">
         
         {/* LEFT COLUMN: Data Connection & BI Builder Configuration */}
         <div className="lg:col-span-4 flex flex-col gap-6">
@@ -1023,7 +1023,7 @@ export default function App() {
 
       {/* Corporate Compact Footer */}
       <footer id="app-footer-bar" className="bg-white border-t border-slate-200 mt-12 py-5 px-6">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-400 gap-3">
+        <div className="max-w-[98%] mx-auto flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-400 gap-3">
           <div className="flex items-center gap-2">
             <Database className="w-3.5 h-3.5 text-slate-400" />
             <span>SheetSight Pro Multidimensional Intelligence Engine • Built with React, Vite & Gemini 3.5 API</span>
