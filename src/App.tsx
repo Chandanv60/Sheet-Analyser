@@ -62,7 +62,7 @@ const CHART_COLORS = [
 export default function App() {
   // Input Google Sheet link or spreadsheet ID
   const [sheetUrlOrId, setSheetUrlOrId] = useState(() => {
-    return localStorage.getItem("sheetSight_lastUrl") || "";
+    return localStorage.getItem("sheetSight_lastUrl") || "https://docs.google.com/spreadsheets/d/1oHAYnC2pQ9AbmECZmrSPtgDZsW0i-nxe5uKLQkzC6nA/edit?gid=0#gid=0";
   });
   const [loadingSheet, setLoadingSheet] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -100,14 +100,10 @@ export default function App() {
   const [insightsText, setInsightsText] = useState<string>("");
   const [generatingInsights, setGeneratingInsights] = useState(false);
 
-  // Initialize with last saved URL or Default Sample on Load
+  // Initialize with last saved URL or Default Sheet on Load
   useEffect(() => {
-    const savedUrl = localStorage.getItem("sheetSight_lastUrl");
-    if (savedUrl) {
-      handleImportGoogleSheet(undefined, savedUrl);
-    } else {
-      loadSampleDataset(0);
-    }
+    const savedUrl = localStorage.getItem("sheetSight_lastUrl") || "https://docs.google.com/spreadsheets/d/1oHAYnC2pQ9AbmECZmrSPtgDZsW0i-nxe5uKLQkzC6nA/edit?gid=0#gid=0";
+    handleImportGoogleSheet(undefined, savedUrl);
   }, []);
 
   // Whenever dataset or report parameters shift, adjust local aggregated points
@@ -398,9 +394,13 @@ export default function App() {
               {SAMPLE_DATASETS.map((item, idx) => (
                 <button
                   key={idx}
-                  onClick={() => loadSampleDataset(idx)}
+                  onClick={() => {
+                    const targetUrl = "https://docs.google.com/spreadsheets/d/1oHAYnC2pQ9AbmECZmrSPtgDZsW0i-nxe5uKLQkzC6nA/edit?gid=0#gid=0";
+                    setSheetUrlOrId(targetUrl);
+                    handleImportGoogleSheet(undefined, targetUrl);
+                  }}
                   className={`bg-white hover:bg-slate-50 text-slate-700 text-xs py-1.5 px-2.5 rounded border font-semibold transition flex items-center gap-1 active:scale-95 shadow-2xs cursor-pointer ${
-                    sheetData && sheetData.headers.join(',') === SAMPLE_DATASETS[idx].rawCSV.split('\n')[0] ? "border-indigo-500 bg-indigo-50/20 text-indigo-700" : "border-slate-200"
+                    sheetData && (sheetData.headers.join(',') === SAMPLE_DATASETS[idx].rawCSV.split('\n')[0] || sheetUrlOrId === "https://docs.google.com/spreadsheets/d/1oHAYnC2pQ9AbmECZmrSPtgDZsW0i-nxe5uKLQkzC6nA/edit?gid=0#gid=0") ? "border-indigo-500 bg-indigo-50/20 text-indigo-700" : "border-slate-200"
                   }`}
                 >
                   <Database className="w-3.5 h-3.5 text-indigo-600" />
