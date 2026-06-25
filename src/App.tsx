@@ -383,12 +383,12 @@ export default function App() {
             </div>
             <div>
               <h1 className="text-lg font-bold text-slate-950 tracking-tight flex items-center gap-2">
-                SheetSight<span className="text-indigo-600">Pro</span>
+                CBD Procurement<span className="text-indigo-600"> Intelligence Tool</span>
                 <span className="text-[10px] bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded font-semibold border border-indigo-150">
-                  Live BI
+                  Active BI
                 </span>
               </h1>
-              <p className="text-xs text-slate-500 mt-0.5">Report, group, and slice Google Sheets automatically using multidimensional visual analytics</p>
+              <p className="text-xs text-slate-500 mt-0.5">Comprehensive Cost Breakdown Structure (CBD) analyzer and supplier savings reporting dashboard</p>
             </div>
           </div>
           
@@ -1042,7 +1042,7 @@ export default function App() {
         <div className="max-w-[98%] mx-auto flex flex-col sm:flex-row items-center justify-between text-[11px] text-slate-400 gap-3">
           <div className="flex items-center gap-2">
             <Database className="w-3.5 h-3.5 text-slate-400" />
-            <span>SheetSight Pro Multidimensional Intelligence Engine • Built with React, Vite & Gemini 3.5 API</span>
+            <span>CBD Procurement Intelligence Tool • Owned & Released by Chandan • Built with React, Vite & Gemini 3.5 API</span>
           </div>
           <div className="flex items-center gap-3">
             <span>Server Proxy Active</span>
