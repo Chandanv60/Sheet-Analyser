@@ -30,7 +30,10 @@ import {
   Tooltip,
   Cell,
   PieChart,
-  Pie
+  Pie,
+  LabelList,
+  CartesianGrid,
+  Legend
 } from "recharts";
 import { SheetData } from "../types";
 
@@ -54,7 +57,7 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
   const { rows, headers } = sheetData;
 
   // Primary navigation sub-tabs
-  const [currentTab, setCurrentTab] = useState<"vendors" | "cbds" | "processes">("vendors");
+  const [currentTab, setCurrentTab] = useState<"vendors" | "cbds" | "processes" | "brand_pis">("vendors");
 
   // Selection states
   const [selectedCbdId, setSelectedCbdId] = useState<string>("");
@@ -68,6 +71,9 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
 
   // Interactive local states
   const [supplierType, setSupplierType] = useState<"fg_supplier" | "component_supplier">("fg_supplier");
+  const [selectedUniverse, setSelectedUniverse] = useState<string>("");
+  const [brandMetric, setBrandMetric] = useState<"savings" | "quantity" | "lines">("savings");
+  const [pisMetric, setPisMetric] = useState<"savings" | "quantity" | "lines">("savings");
 
   // Helper: robust number parsing
   const parseNum = (val: string | number | undefined): number => {
@@ -76,6 +82,76 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
     const clean = String(val).replace(/[$,%\s]/g, "").trim();
     const num = Number(clean);
     return isNaN(num) ? 0 : num;
+  };
+
+  // Helper: format metric values for chart labels
+  const getFormattedValue = (val: number, metricType: "savings" | "quantity" | "lines") => {
+    if (metricType === "savings") {
+      if (val >= 1000000) return `$${(val / 1000000).toFixed(1)}M`;
+      if (val >= 1000) return `$${(val / 1000).toFixed(0)}k`;
+      return `$${val.toLocaleString()}`;
+    } else {
+      if (val >= 1000000) return `${(val / 1000000).toFixed(1)}M`;
+      if (val >= 1000) return `${(val / 1000).toFixed(0)}k`;
+      return val.toLocaleString();
+    }
+  };
+
+  // Helper: download chart SVG as crisp PNG image
+  const handleExportChartPng = (containerId: string, title: string) => {
+    const element = document.getElementById(containerId);
+    if (!element) {
+      console.error("Chart element not found");
+      return;
+    }
+    const svgElement = element.querySelector("svg");
+    if (!svgElement) {
+      console.error("SVG element not found inside chart container");
+      return;
+    }
+
+    try {
+      const serializer = new XMLSerializer();
+      let svgString = serializer.serializeToString(svgElement);
+      
+      if (!svgElement.getAttribute("xmlns")) {
+        svgString = svgString.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"');
+      }
+
+      const svgBlob = new Blob([svgString], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(svgBlob);
+      
+      const image = new Image();
+      image.onload = () => {
+        const canvas = document.createElement("canvas");
+        const bbox = svgElement.getBoundingClientRect();
+        
+        const scale = 2;
+        canvas.width = (bbox.width || 600) * scale;
+        canvas.height = (bbox.height || 350) * scale;
+        
+        const context = canvas.getContext("2d");
+        if (context) {
+          context.fillStyle = "#ffffff";
+          context.fillRect(0, 0, canvas.width, canvas.height);
+          
+          context.scale(scale, scale);
+          context.drawImage(image, 0, 0, bbox.width || 600, bbox.height || 350);
+          
+          const pngUrl = canvas.toDataURL("image/png");
+          const downloadLink = document.createElement("a");
+          downloadLink.href = pngUrl;
+          downloadLink.download = `${title.replace(/\s+/g, "_")}.png`;
+          document.body.appendChild(downloadLink);
+          downloadLink.click();
+          document.body.removeChild(downloadLink);
+        }
+        URL.revokeObjectURL(url);
+      };
+      image.src = url;
+    } catch (e) {
+      console.error("Failed to export chart to PNG:", e);
+    }
   };
 
   // Identify available key columns dynamically
@@ -91,6 +167,25 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
   const seasonCol = headers.find(h => h.toLowerCase() === "season") || "Season";
   const codeCol = headers.find(h => h.toLowerCase() === "item_code" || h.toLowerCase() === "dsm_code") || "item_code";
   const sectionCol = headers.find(h => h.toLowerCase() === "section" || h.toLowerCase() === "process" || h.toLowerCase() === "department") || "section";
+  const universeCol = headers.find(h => h.toLowerCase() === "industrial universe" || h.toLowerCase() === "universe" || h.toLowerCase().includes("universe")) || "Industrial universe";
+  const brandCol = headers.find(h => h.toLowerCase() === "brand" || h.toLowerCase().includes("brand")) || "Brand";
+  const pisCol = headers.find(h => h.toLowerCase() === "pis" || h.toLowerCase().includes("pis") || h.toLowerCase() === "pis owner") || "PIS";
+
+  // Extract all unique universe values for the filtering dropdown
+  const universeValues = useMemo(() => {
+    const set = new Set<string>();
+    rows.forEach(r => {
+      const val = String(r[universeCol] || "").trim();
+      if (val) set.add(val);
+    });
+    return Array.from(set).sort();
+  }, [rows, universeCol]);
+
+  // Dynamically filter rows based on Selected Industrial Universe
+  const filteredRows = useMemo(() => {
+    if (!selectedUniverse) return rows;
+    return rows.filter(r => String(r[universeCol] || "").trim() === selectedUniverse);
+  }, [rows, selectedUniverse, universeCol]);
 
   // ==========================================
   // 1. STATISTIC METRICS SUMMARY (KPIs)
@@ -105,7 +200,7 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
     let totalSavingsPot = 0;
     let totalItems = 0;
     
-    rows.forEach(r => {
+    filteredRows.forEach(r => {
       const cbdId = String(r[cbdIdCol] || "").trim();
       if (cbdId) {
         uniqueCbds.add(cbdId);
@@ -142,7 +237,7 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
       statusBreakdown: statusArray,
       totalItems
     };
-  }, [rows, cbdIdCol, cbdStatusCol, fgSupplierCol, compSupplierCol, sectionCol, totalGapCol]);
+  }, [filteredRows, cbdIdCol, cbdStatusCol, fgSupplierCol, compSupplierCol, sectionCol, totalGapCol]);
 
   // ==========================================
   // 2. FULL AGGREGATES FOR CSV EXTRACTION
@@ -158,7 +253,7 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
       cbds: Set<string>;
     }> = {};
 
-    rows.forEach(r => {
+    filteredRows.forEach(r => {
       const supplierName = String(r[fgSupplierCol] || "(Blank/Unknown)").trim();
       const gapSavings = parseNum(r[totalGapCol]);
       const qtyVal = parseNum(r[qtyCol]);
@@ -190,7 +285,7 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
       totalSavings: Number(item.savingsPot.toFixed(2)),
       avgGap: item.itemsCount > 0 ? Number((item.savingsPot / item.itemsCount).toFixed(2)) : 0
     })).sort((a, b) => b.totalSavings - a.totalSavings);
-  }, [rows, fgSupplierCol, totalGapCol, qtyCol, cbdIdCol]);
+  }, [filteredRows, fgSupplierCol, totalGapCol, qtyCol, cbdIdCol]);
 
   // Component Supplier Fully Aggregated
   const compSupplierSavingsFull = useMemo(() => {
@@ -202,7 +297,7 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
       cbds: Set<string>;
     }> = {};
 
-    rows.forEach(r => {
+    filteredRows.forEach(r => {
       const supplierName = String(r[compSupplierCol] || "(Blank/Unknown)").trim();
       const gapSavings = parseNum(r[totalGapCol]);
       const qtyVal = parseNum(r[qtyCol]);
@@ -234,7 +329,7 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
       totalSavings: Number(item.savingsPot.toFixed(2)),
       avgGap: item.itemsCount > 0 ? Number((item.savingsPot / item.itemsCount).toFixed(2)) : 0
     })).sort((a, b) => b.totalSavings - a.totalSavings);
-  }, [rows, compSupplierCol, totalGapCol, qtyCol, cbdIdCol]);
+  }, [filteredRows, compSupplierCol, totalGapCol, qtyCol, cbdIdCol]);
 
   // Active view supplier savings (based on selected toggle)
   const activeSupplierSavingsList = useMemo(() => {
@@ -263,7 +358,7 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
       primarySupplier: string;
     }> = {};
 
-    rows.forEach(r => {
+    filteredRows.forEach(r => {
       const cbdId = String(r[cbdIdCol] || "").trim();
       if (!cbdId) return;
 
@@ -281,7 +376,7 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
           totalSavings: 0,
           totalQty: 0,
           primarySupplier: supplierVal
-        };
+         };
       }
 
       list[cbdId].itemsCount += 1;
@@ -290,7 +385,7 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
     });
 
     return Object.values(list).sort((a,b) => b.totalSavings - a.totalSavings);
-  }, [rows, cbdIdCol, cbdStatusCol, seasonCol, countryCol, totalGapCol, qtyCol, fgSupplierCol]);
+  }, [filteredRows, cbdIdCol, cbdStatusCol, seasonCol, countryCol, totalGapCol, qtyCol, fgSupplierCol]);
 
   const filteredCbds = useMemo(() => {
     return cbdListWithDetails.filter(c => 
@@ -313,7 +408,7 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
       uniqueSuppliers: Set<string>;
     }> = {};
 
-    rows.forEach(r => {
+    filteredRows.forEach(r => {
       const sectionName = String(r[sectionCol] || "(Blank/Unknown)").trim();
       const gapSavings = parseNum(r[totalGapCol]);
       const qtyVal = parseNum(r[qtyCol]);
@@ -347,13 +442,111 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
       totalSavings: Number(item.savingsPot.toFixed(2)),
       avgGap: item.itemsCount > 0 ? Number((item.savingsPot / item.itemsCount).toFixed(2)) : 0
     })).sort((a, b) => b.totalSavings - a.totalSavings);
-  }, [rows, sectionCol, totalGapCol, qtyCol, cbdIdCol, fgSupplierCol]);
+  }, [filteredRows, sectionCol, totalGapCol, qtyCol, cbdIdCol, fgSupplierCol]);
 
   const filteredProcesses = useMemo(() => {
     return processWiseSavings.filter(p => 
       p.processSection.toLowerCase().includes(processSearchQuery.toLowerCase())
     );
   }, [processWiseSavings, processSearchQuery]);
+
+  // Brand-wise aggregates from the filtered rows
+  const brandAggregates = useMemo(() => {
+    const aggregates: Record<string, {
+      brand: string;
+      savings: number;
+      qty: number;
+      lines: number;
+      uniqueCbds: Set<string>;
+    }> = {};
+
+    filteredRows.forEach(r => {
+      let brandVal = String(r[brandCol] || "").trim();
+      if (!brandVal) {
+        brandVal = "(Blank/Unknown)";
+      }
+
+      const totalGap = parseNum(r[totalGapCol]);
+      const qty = parseNum(r[qtyCol]);
+      const cbdId = String(r[cbdIdCol] || "").trim();
+
+      if (!aggregates[brandVal]) {
+        aggregates[brandVal] = {
+          brand: brandVal,
+          savings: 0,
+          qty: 0,
+          lines: 0,
+          uniqueCbds: new Set()
+        };
+      }
+
+      aggregates[brandVal].savings += totalGap;
+      aggregates[brandVal].qty += qty;
+      aggregates[brandVal].lines += 1;
+      if (cbdId) {
+        aggregates[brandVal].uniqueCbds.add(cbdId);
+      }
+    });
+
+    return Object.values(aggregates)
+      .map(item => ({
+        brandName: item.brand,
+        totalSavings: Number(item.savings.toFixed(2)),
+        totalQty: item.qty,
+        linesCount: item.lines,
+        uniqueCbdsCount: item.uniqueCbds.size
+      }))
+      .sort((a, b) => b.totalSavings - a.totalSavings);
+  }, [filteredRows, brandCol, totalGapCol, qtyCol, cbdIdCol]);
+
+  // PIS-wise aggregates from the filtered rows
+  const pisAggregates = useMemo(() => {
+    const aggregates: Record<string, {
+      pis: string;
+      savings: number;
+      qty: number;
+      lines: number;
+      uniqueCbds: Set<string>;
+    }> = {};
+
+    filteredRows.forEach(r => {
+      let pisVal = String(r[pisCol] || "").trim();
+      if (!pisVal) {
+        pisVal = "(Blank/Unknown)";
+      }
+
+      const totalGap = parseNum(r[totalGapCol]);
+      const qty = parseNum(r[qtyCol]);
+      const cbdId = String(r[cbdIdCol] || "").trim();
+
+      if (!aggregates[pisVal]) {
+        aggregates[pisVal] = {
+          pis: pisVal,
+          savings: 0,
+          qty: 0,
+          lines: 0,
+          uniqueCbds: new Set()
+        };
+      }
+
+      aggregates[pisVal].savings += totalGap;
+      aggregates[pisVal].qty += qty;
+      aggregates[pisVal].lines += 1;
+      if (cbdId) {
+        aggregates[pisVal].uniqueCbds.add(cbdId);
+      }
+    });
+
+    return Object.values(aggregates)
+      .map(item => ({
+        pisOwner: item.pis,
+        totalSavings: Number(item.savings.toFixed(2)),
+        totalQty: item.qty,
+        linesCount: item.lines,
+        uniqueCbdsCount: item.uniqueCbds.size
+      }))
+      .sort((a, b) => b.totalSavings - a.totalSavings);
+  }, [filteredRows, pisCol, totalGapCol, qtyCol, cbdIdCol]);
 
   // ==========================================
   // DETAILED DRILLDOWN VIEWS
@@ -363,7 +556,7 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
   const currentSupplierDetail = useMemo(() => {
     if (!selectedSupplierId) return null;
     const targetCol = supplierType === "fg_supplier" ? fgSupplierCol : compSupplierCol;
-    const supplierRows = rows.filter(r => String(r[targetCol] || "").trim() === selectedSupplierId);
+    const supplierRows = filteredRows.filter(r => String(r[targetCol] || "").trim() === selectedSupplierId);
     
     let totalSavings = 0;
     let totalQty = 0;
@@ -384,12 +577,12 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
       cbdsCount: uniqCbds.size,
       cbdsList: Array.from(uniqCbds)
     };
-  }, [rows, selectedSupplierId, supplierType, fgSupplierCol, compSupplierCol, totalGapCol, qtyCol, cbdIdCol]);
+  }, [filteredRows, selectedSupplierId, supplierType, fgSupplierCol, compSupplierCol, totalGapCol, qtyCol, cbdIdCol]);
 
   // Drilldown: CBD Detail Accordion
   const currentCbdDetail = useMemo(() => {
     if (!selectedCbdId) return null;
-    const cbdRows = rows.filter(r => String(r[cbdIdCol] || "").trim() === selectedCbdId);
+    const cbdRows = filteredRows.filter(r => String(r[cbdIdCol] || "").trim() === selectedCbdId);
     
     let totalSavings = 0;
     let totalQty = 0;
@@ -421,12 +614,12 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
       rowCount: cbdRows.length,
       items: cbdRows
     };
-  }, [rows, selectedCbdId, cbdIdCol, cbdStatusCol, seasonCol, countryCol, fgSupplierCol, totalGapCol, qtyCol]);
+  }, [filteredRows, selectedCbdId, cbdIdCol, cbdStatusCol, seasonCol, countryCol, fgSupplierCol, totalGapCol, qtyCol]);
 
   // Drilldown: Process/Section Detail Accordion
   const currentProcessDetail = useMemo(() => {
     if (!selectedProcessSection) return null;
-    const sectionRows = rows.filter(r => String(r[sectionCol] || "").trim() === selectedProcessSection);
+    const sectionRows = filteredRows.filter(r => String(r[sectionCol] || "").trim() === selectedProcessSection);
     
     let totalSavings = 0;
     let totalQty = 0;
@@ -452,7 +645,7 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
       suppliersCount: uniqSuppliers.size,
       suppliersList: Array.from(uniqSuppliers)
     };
-  }, [rows, selectedProcessSection, sectionCol, totalGapCol, qtyCol, cbdIdCol, fgSupplierCol]);
+  }, [filteredRows, selectedProcessSection, sectionCol, totalGapCol, qtyCol, cbdIdCol, fgSupplierCol]);
 
   // ==========================================
   // CHART BUILDERS
@@ -477,6 +670,42 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
       items: p.itemsCount
     }));
   }, [processWiseSavings]);
+
+  // Brand-Wise Chart
+  const brandChartData = useMemo(() => {
+    return brandAggregates.slice(0, 10).map(b => {
+      const val = brandMetric === "savings" ? b.totalSavings 
+                    : brandMetric === "quantity" ? b.totalQty 
+                    : b.linesCount;
+      return {
+        name: b.brandName.length > 18 ? b.brandName.substring(0, 16) + '...' : b.brandName,
+        fullName: b.brandName,
+        value: Number(val.toFixed(1)),
+        savings: b.totalSavings,
+        quantity: b.totalQty,
+        lines: b.linesCount,
+        cbds: b.uniqueCbdsCount
+      };
+    });
+  }, [brandAggregates, brandMetric]);
+
+  // PIS-Wise Chart
+  const pisChartData = useMemo(() => {
+    return pisAggregates.slice(0, 10).map(p => {
+      const val = pisMetric === "savings" ? p.totalSavings 
+                    : pisMetric === "quantity" ? p.totalQty 
+                    : p.linesCount;
+      return {
+        name: p.pisOwner.length > 18 ? p.pisOwner.substring(0, 16) + '...' : p.pisOwner,
+        fullName: p.pisOwner,
+        value: Number(val.toFixed(1)),
+        savings: p.totalSavings,
+        quantity: p.totalQty,
+        lines: p.linesCount,
+        cbds: p.uniqueCbdsCount
+      };
+    });
+  }, [pisAggregates, pisMetric]);
 
   // ==========================================
   // CSV EXPORT UTILITY HANDLERS
@@ -584,6 +813,42 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
       item.avgGap
     ]);
     downloadCSVFile("Process_Wise_Savings_Sourcing_Report.csv", headersList, rowsList);
+  };
+
+  const handleExportBrandTable = () => {
+    const headersList = [
+      "Brand Name",
+      "Unique CBD Contracts Involved",
+      "Material Sourcing Lines Count",
+      "Total Sourced Volume Quantity",
+      "Total Potential Cost Savings (USD)"
+    ];
+    const rowsList = brandAggregates.map(item => [
+      item.brandName,
+      item.uniqueCbdsCount,
+      item.linesCount,
+      item.totalQty,
+      item.totalSavings
+    ]);
+    downloadCSVFile("Brand_Performance_Savings_Report.csv", headersList, rowsList);
+  };
+
+  const handleExportPISTable = () => {
+    const headersList = [
+      "PIS Owner Name",
+      "Unique CBD Contracts Involved",
+      "Material Sourcing Lines Count",
+      "Total Sourced Volume Quantity",
+      "Total Potential Cost Savings (USD)"
+    ];
+    const rowsList = pisAggregates.map(item => [
+      item.pisOwner,
+      item.uniqueCbdsCount,
+      item.linesCount,
+      item.totalQty,
+      item.totalSavings
+    ]);
+    downloadCSVFile("PIS_Performance_Savings_Report.csv", headersList, rowsList);
   };
 
   return (
@@ -702,8 +967,43 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
         </div>
       </div>
 
+      {/* Industrial Universe Sourcing Filter Controls */}
+      <div className="bg-white rounded-xl border border-slate-200 p-4 shadow-2xs flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div className="flex items-center gap-2.5">
+          <div className="bg-indigo-50 p-2 rounded-lg text-indigo-600">
+            <SlidersHorizontal className="w-4 h-4" />
+          </div>
+          <div>
+            <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider">Industrial Universe Segment Filter</h4>
+            <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Filter all indexes, charts, contract profiles, and performance metrics in this view</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <span className="text-xs font-bold text-slate-500 whitespace-nowrap">Segment Universe:</span>
+          <select
+            id="universe-filter-select"
+            value={selectedUniverse}
+            onChange={(e) => setSelectedUniverse(e.target.value)}
+            className="w-full sm:w-64 bg-slate-50 border border-slate-200 text-xs font-bold rounded-lg px-3 py-2 text-slate-700 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 focus:bg-white cursor-pointer"
+          >
+            <option value="">All Industrial Universes (No Filter)</option>
+            {universeValues.map((univ, idx) => (
+              <option key={idx} value={univ}>{univ}</option>
+            ))}
+          </select>
+          {selectedUniverse && (
+            <button
+              onClick={() => setSelectedUniverse("")}
+              className="text-xs font-bold text-red-500 hover:text-red-700 bg-red-50 px-2.5 py-2 rounded-lg border border-red-100 transition whitespace-nowrap cursor-pointer active:scale-95"
+            >
+              Clear Filter
+            </button>
+          )}
+        </div>
+      </div>
+
       {/* 3. Primary Dashboard Sub-Navigation Tabs */}
-      <div className="flex border-b border-slate-200 bg-white p-1 rounded-xl shadow-2xs gap-1">
+      <div className="flex flex-col sm:flex-row border-b border-slate-200 bg-white p-1 rounded-xl shadow-2xs gap-1">
         <button
           onClick={() => setCurrentTab("vendors")}
           className={`flex-1 py-3 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer ${
@@ -736,6 +1036,17 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
         >
           <Cpu className="w-4 h-4" />
           <span>Process-Wise Savings Report</span>
+        </button>
+        <button
+          onClick={() => setCurrentTab("brand_pis")}
+          className={`flex-1 py-3 text-xs font-bold rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            currentTab === "brand_pis" 
+              ? "bg-indigo-600 text-white shadow-xs" 
+              : "text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+          }`}
+        >
+          <TrendingUp className="w-4 h-4" />
+          <span>Brand & PIS Performance Analytics</span>
         </button>
       </div>
 
@@ -1330,7 +1641,321 @@ export default function CbdProcurementDashboard({ sheetData }: CbdProcurementDas
           </div>
         )}
 
+        {/* TAB D: BRAND & PIS PERFORMANCE ANALYTICS */}
+        {currentTab === "brand_pis" && (
+          <div className="space-y-6">
+            
+            {/* KPI Boxes specifically for Brand & PIS */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Identified Brands</p>
+                <h4 className="text-3xl font-black mt-1 text-indigo-600">{brandAggregates.length}</h4>
+                <p className="text-[10px] text-slate-500 mt-2 font-semibold">Unique product brand segments</p>
+              </div>
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">PIS Owners / Managers</p>
+                <h4 className="text-3xl font-black mt-1 text-cyan-600">{pisAggregates.length}</h4>
+                <p className="text-[10px] text-slate-500 mt-2 font-semibold">Active sourcing team members</p>
+              </div>
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Top Brand (Savings)</p>
+                <h4 className="text-lg font-black mt-1 text-slate-800 truncate" title={brandAggregates[0]?.brandName || "N/A"}>
+                  {brandAggregates[0]?.brandName || "N/A"}
+                </h4>
+                <p className="text-[10px] text-emerald-600 mt-1 font-bold">
+                  ${(brandAggregates[0]?.totalSavings || 0).toLocaleString()} potential savings
+                </p>
+              </div>
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-2xs">
+                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Top PIS Sourcing (Savings)</p>
+                <h4 className="text-lg font-black mt-1 text-slate-800 truncate" title={pisAggregates[0]?.pisOwner || "N/A"}>
+                  {pisAggregates[0]?.pisOwner || "N/A"}
+                </h4>
+                <p className="text-[10px] text-emerald-600 mt-1 font-bold">
+                  ${(pisAggregates[0]?.totalSavings || 0).toLocaleString()} potential savings
+                </p>
+              </div>
+            </div>
+
+            {/* Grid for Brand and PIS Analytics Charts */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              
+              {/* BRAND ANALYTICS PANEL */}
+              <div className="bg-white rounded-xl border border-slate-200 shadow-2xs p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                      <TrendingUp className="w-4 h-4 text-indigo-600" />
+                      Brand-Wise Sourcing Performance
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">Top 10 Sourcing Brands Segmented</p>
+                  </div>
+                  
+                  {/* Selector for Brand metric */}
+                  <div className="flex bg-slate-100 p-1 rounded-lg gap-1">
+                    <button
+                      onClick={() => setBrandMetric("savings")}
+                      className={`px-2.5 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer ${brandMetric === "savings" ? "bg-indigo-600 text-white shadow-xs" : "text-slate-500 hover:text-slate-800"}`}
+                    >
+                      Savings
+                    </button>
+                    <button
+                      onClick={() => setBrandMetric("quantity")}
+                      className={`px-2.5 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer ${brandMetric === "quantity" ? "bg-indigo-600 text-white shadow-xs" : "text-slate-500 hover:text-slate-800"}`}
+                    >
+                      Volume
+                    </button>
+                    <button
+                      onClick={() => setBrandMetric("lines")}
+                      className={`px-2.5 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer ${brandMetric === "lines" ? "bg-indigo-600 text-white shadow-xs" : "text-slate-500 hover:text-slate-800"}`}
+                    >
+                      Lines
+                    </button>
+                  </div>
+                </div>
+
+                {/* Brand Chart */}
+                <div id="brand-chart-container" className="h-64 w-full bg-slate-50/50 p-2 rounded-lg border border-slate-100 relative">
+                  {brandChartData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={brandChartData} margin={{ top: 25, right: 10, left: 10, bottom: 5 }}>
+                        <XAxis dataKey="name" stroke="#64748b" fontSize={9} tickLine={false} axisLine={false} />
+                        <YAxis stroke="#64748b" fontSize={9} tickLine={false} axisLine={false} width={45} />
+                        <Tooltip
+                          cursor={{ fill: '#f1f5f9', opacity: 0.5 }}
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              const data = payload[0].payload;
+                              return (
+                                <div className="bg-slate-900 text-white p-3 rounded shadow-lg text-xs space-y-1 z-50">
+                                  <p className="font-bold border-b border-slate-700 pb-1 mb-1">{data.fullName}</p>
+                                  <p className="text-emerald-400 font-semibold">Savings Pot: ${data.savings.toLocaleString()}</p>
+                                  <p className="text-cyan-300 font-semibold">Sourced Qty: {data.quantity.toLocaleString()} Units</p>
+                                  <p className="text-slate-300">Material Lines: {data.lines}</p>
+                                  <p className="text-slate-300">CBD Contracts: {data.cbds}</p>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        <Bar dataKey="value" fill="#4f46e5" radius={[4, 4, 0, 0]}>
+                          <LabelList 
+                            dataKey="value" 
+                            position="top" 
+                            fontSize={8} 
+                            fontWeight="bold" 
+                            fill="#475569" 
+                            formatter={(val: any) => getFormattedValue(Number(val), brandMetric)} 
+                          />
+                          {brandChartData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-slate-400 text-xs">No brand data available.</div>
+                  )}
+                </div>
+
+                {/* Exporters */}
+                <div className="flex justify-end gap-2 text-xs">
+                  <button
+                    onClick={() => handleExportChartPng("brand-chart-container", "Brand_Sourcing_Performance_Chart")}
+                    className="bg-white hover:bg-slate-50 text-slate-700 font-bold py-1.5 px-3 rounded border border-slate-200 transition flex items-center gap-1.5 shadow-2xs cursor-pointer active:scale-95"
+                    title="Download chart visualization as PNG image"
+                  >
+                    <Download className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Download Chart (PNG)</span>
+                  </button>
+                  <button
+                    onClick={handleExportBrandTable}
+                    className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-1.5 px-3 rounded transition flex items-center gap-1.5 shadow-2xs cursor-pointer active:scale-95"
+                    title="Export table data to CSV"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-200" />
+                    <span>Export Brand Data (CSV)</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* PIS ANALYTICS PANEL */}
+              <div className="bg-white rounded-xl border border-slate-200 shadow-2xs p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-3">
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                      <TrendingUp className="w-4 h-4 text-cyan-600" />
+                      PIS Owner Performance
+                    </h3>
+                    <p className="text-xs text-slate-400 mt-0.5">Top 10 Sourcing PIS Managers</p>
+                  </div>
+                  
+                  {/* Selector for PIS metric */}
+                  <div className="flex bg-slate-100 p-1 rounded-lg gap-1">
+                    <button
+                      onClick={() => setPisMetric("savings")}
+                      className={`px-2.5 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer ${pisMetric === "savings" ? "bg-cyan-600 text-white shadow-xs" : "text-slate-500 hover:text-slate-800"}`}
+                    >
+                      Savings
+                    </button>
+                    <button
+                      onClick={() => setPisMetric("quantity")}
+                      className={`px-2.5 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer ${pisMetric === "quantity" ? "bg-cyan-600 text-white shadow-xs" : "text-slate-500 hover:text-slate-800"}`}
+                    >
+                      Volume
+                    </button>
+                    <button
+                      onClick={() => setPisMetric("lines")}
+                      className={`px-2.5 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer ${pisMetric === "lines" ? "bg-cyan-600 text-white shadow-xs" : "text-slate-500 hover:text-slate-800"}`}
+                    >
+                      Lines
+                    </button>
+                  </div>
+                </div>
+
+                {/* PIS Chart */}
+                <div id="pis-chart-container" className="h-64 w-full bg-slate-50/50 p-2 rounded-lg border border-slate-100 relative">
+                  {pisChartData.length > 0 ? (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={pisChartData} margin={{ top: 25, right: 10, left: 10, bottom: 5 }}>
+                        <XAxis dataKey="name" stroke="#64748b" fontSize={9} tickLine={false} axisLine={false} />
+                        <YAxis stroke="#64748b" fontSize={9} tickLine={false} axisLine={false} width={45} />
+                        <Tooltip
+                          cursor={{ fill: '#f1f5f9', opacity: 0.5 }}
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              const data = payload[0].payload;
+                              return (
+                                <div className="bg-slate-900 text-white p-3 rounded shadow-lg text-xs space-y-1 z-50">
+                                  <p className="font-bold border-b border-slate-700 pb-1 mb-1">{data.fullName}</p>
+                                  <p className="text-emerald-400 font-semibold">Savings Pot: ${data.savings.toLocaleString()}</p>
+                                  <p className="text-cyan-300 font-semibold">Sourced Qty: {data.quantity.toLocaleString()} Units</p>
+                                  <p className="text-slate-300">Material Lines: {data.lines}</p>
+                                  <p className="text-slate-300">CBD Contracts: {data.cbds}</p>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        <Bar dataKey="value" fill="#0891b2" radius={[4, 4, 0, 0]}>
+                          <LabelList 
+                            dataKey="value" 
+                            position="top" 
+                            fontSize={8} 
+                            fontWeight="bold" 
+                            fill="#475569" 
+                            formatter={(val: any) => getFormattedValue(Number(val), pisMetric)} 
+                          />
+                          {pisChartData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={CHART_COLORS[(index + 3) % CHART_COLORS.length]} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  ) : (
+                    <div className="h-full flex items-center justify-center text-slate-400 text-xs">No PIS data available.</div>
+                  )}
+                </div>
+
+                {/* Exporters */}
+                <div className="flex justify-end gap-2 text-xs">
+                  <button
+                    onClick={() => handleExportChartPng("pis-chart-container", "PIS_Sourcing_Performance_Chart")}
+                    className="bg-white hover:bg-slate-50 text-slate-700 font-bold py-1.5 px-3 rounded border border-slate-200 transition flex items-center gap-1.5 shadow-2xs cursor-pointer active:scale-95"
+                    title="Download chart visualization as PNG image"
+                  >
+                    <Download className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Download Chart (PNG)</span>
+                  </button>
+                  <button
+                    onClick={handleExportPISTable}
+                    className="bg-cyan-600 hover:bg-cyan-500 text-white font-bold py-1.5 px-3 rounded transition flex items-center gap-1.5 shadow-2xs cursor-pointer active:scale-95"
+                    title="Export table data to CSV"
+                  >
+                    <FileSpreadsheet className="w-3.5 h-3.5 text-cyan-100" />
+                    <span>Export PIS Data (CSV)</span>
+                  </button>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Side-by-side Index Tables for Brand & PIS */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              
+              {/* Brands Index Table */}
+              <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
+                <div className="p-4 bg-slate-50 border-b border-slate-150 flex justify-between items-center">
+                  <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider">Brands Index Breakdown</h3>
+                  <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-full">{brandAggregates.length} segments</span>
+                </div>
+                <div className="overflow-x-auto max-h-[280px] overflow-y-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 text-slate-400 font-bold border-b border-slate-150 select-none">
+                        <th className="py-2.5 px-4 uppercase tracking-wider text-[9px]">Brand Name</th>
+                        <th className="py-2.5 px-4 uppercase tracking-wider text-[9px] text-right">Unique CBDs</th>
+                        <th className="py-2.5 px-4 uppercase tracking-wider text-[9px] text-right">Lines</th>
+                        <th className="py-2.5 px-4 uppercase tracking-wider text-[9px] text-right">Sourced Qty</th>
+                        <th className="py-2.5 px-4 uppercase tracking-wider text-[9px] text-right text-indigo-600">Savings</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
+                      {brandAggregates.map((brand, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50">
+                          <td className="py-2.5 px-4 font-bold text-slate-900 capitalize">{brand.brandName}</td>
+                          <td className="py-2.5 px-4 text-right font-mono text-slate-500">{brand.uniqueCbdsCount}</td>
+                          <td className="py-2.5 px-4 text-right font-mono text-slate-500">{brand.linesCount}</td>
+                          <td className="py-2.5 px-4 text-right font-mono text-slate-500">{brand.totalQty.toLocaleString()}</td>
+                          <td className="py-2.5 px-4 text-right font-mono font-black text-emerald-600">${brand.totalSavings.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* PIS Index Table */}
+              <div className="bg-white rounded-xl border border-slate-200 shadow-2xs overflow-hidden">
+                <div className="p-4 bg-slate-50 border-b border-slate-150 flex justify-between items-center">
+                  <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider">PIS Owners Index Breakdown</h3>
+                  <span className="text-[10px] font-bold text-cyan-600 bg-cyan-50 px-2.5 py-0.5 rounded-full">{pisAggregates.length} owners</span>
+                </div>
+                <div className="overflow-x-auto max-h-[280px] overflow-y-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 text-slate-400 font-bold border-b border-slate-150 select-none">
+                        <th className="py-2.5 px-4 uppercase tracking-wider text-[9px]">PIS Owner</th>
+                        <th className="py-2.5 px-4 uppercase tracking-wider text-[9px] text-right">Unique CBDs</th>
+                        <th className="py-2.5 px-4 uppercase tracking-wider text-[9px] text-right">Lines</th>
+                        <th className="py-2.5 px-4 uppercase tracking-wider text-[9px] text-right">Sourced Qty</th>
+                        <th className="py-2.5 px-4 uppercase tracking-wider text-[9px] text-right text-cyan-600">Savings</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-semibold text-slate-700">
+                      {pisAggregates.map((pis, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50/50">
+                          <td className="py-2.5 px-4 font-bold text-slate-900 capitalize">{pis.pisOwner}</td>
+                          <td className="py-2.5 px-4 text-right font-mono text-slate-500">{pis.uniqueCbdsCount}</td>
+                          <td className="py-2.5 px-4 text-right font-mono text-slate-500">{pis.linesCount}</td>
+                          <td className="py-2.5 px-4 text-right font-mono text-slate-500">{pis.totalQty.toLocaleString()}</td>
+                          <td className="py-2.5 px-4 text-right font-mono font-black text-emerald-600">${pis.totalSavings.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+            </div>
+
+          </div>
+        )}
+
       </div>
+
 
     </div>
   );
